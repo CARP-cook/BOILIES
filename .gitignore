@@ -1,0 +1,22 @@
+# Environment and virtualenv
+.env
+.venv/
+*.lock
+*.json
+__pycache__/
+*.py[cod]
+*.pyo
+.idea/
+*.iml
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+.DS_Store
+.fseventsd
+.VolumeIcon.icns
+.TemporaryItems
+.apdisk
+.vscode/
