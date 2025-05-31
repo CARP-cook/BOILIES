@@ -25,3 +25,4 @@ backup/
 .VolumeIcon.icns
 .TemporaryItems
 .apdisk
+/debug.log
