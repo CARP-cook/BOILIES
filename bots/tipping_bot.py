@@ -1,11 +1,11 @@
-# rewardbot.py
+# tipping_bot.py
 
 import discord
 import os
 from discord import app_commands
 from dotenv import load_dotenv
 
-from tx_utils import (
+from core.tx_utils import (
     safe_append_tx,
     get_nonce,
     get_or_create_wallet,
@@ -94,7 +94,6 @@ async def multitip(interaction: discord.Interaction, users: str, amounts: str):
         return
 
     total = sum(amount_list)
-    #if sender_wallet["carp_balance"] < total:
     if effective < total:
         await interaction.response.send_message(f"❌ You need {total} BOILIES.", ephemeral=True)
         return

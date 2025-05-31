@@ -1,7 +1,7 @@
 # tx_worker.py
 import time
 from filelock import FileLock
-from tx_utils import (
+from core.tx_utils import (
     load_json,
     save_json,
     append_to_tx_log,
@@ -10,7 +10,7 @@ from tx_utils import (
     save_tickets
 )
 
-from tx_utils import WALLET_FILE, PENDING_FILE, LOCKFILE
+from core.tx_utils import WALLET_FILE, PENDING_FILE, LOCKFILE
 
 
 def process_pending_transactions():

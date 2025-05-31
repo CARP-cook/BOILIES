@@ -2,12 +2,11 @@ import discord
 from discord import app_commands
 import json
 import os
-from filelock import FileLock
 from dotenv import load_dotenv
 from datetime import datetime
 import random
 
-from tx_utils import (
+from core.tx_utils import (
     safe_append_tx,
     get_nonce,
     get_effective_balance
@@ -16,14 +15,21 @@ from tx_utils import (
 load_dotenv()
 ALLOWED_CHANNEL_IDS = set(map(int, os.getenv("RAFFLE_CHANNEL_IDS", "").split(",")))
 
-LOCKFILE = "pending_tx.lock"
+# Set up base and data directories
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+
+# Ensure data directory exists
+os.makedirs(DATA_DIR, exist_ok=True)
+
+LOCKFILE = os.path.join(DATA_DIR, "pending_tx.lock")
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN_RAFFLE")
 ADMIN_IDS = set(map(int, os.getenv("ADMIN_IDS", "").split(",")))
 FISHING_BOT_ID = os.getenv("FISHING_BOT_ID")
-RAFFLES_FILE = "raffles.json"
-TICKETS_FILE = "raffle_tickets.json"
-WINNERS_FILE = "raffle_winners.json"
+RAFFLES_FILE = os.path.join(DATA_DIR, "raffles.json")
+TICKETS_FILE = os.path.join(DATA_DIR, "raffle_tickets.json")
+WINNERS_FILE = os.path.join(DATA_DIR, "raffle_winners.json")
 
 class RaffleBot(discord.Client):
     def __init__(self):
@@ -94,6 +100,16 @@ async def winners_command(interaction: discord.Interaction):
         msg += f"• **{raffle}**: {winner} (<t:{timestamp}:F>)\n"
     await interaction.response.send_message(msg)
 
+# Ensure all required files exist
+for path, default in [
+    (RAFFLES_FILE, {}),
+    (TICKETS_FILE, {}),
+    (WINNERS_FILE, [])
+]:
+    if not os.path.exists(path):
+        with open(path, "w") as f:
+            json.dump(default, f)
+
 if os.path.exists(RAFFLES_FILE):
     with open(RAFFLES_FILE) as f:
         raffles = json.load(f)
@@ -124,47 +140,7 @@ def canonical_json(obj):
     return json.dumps(obj, sort_keys=True, separators=(",", ":"))
 
 
-# Wallet and mempool helpers (new filelock-based system)
-def load_wallets():
-    with FileLock(LOCKFILE):
-        if os.path.exists("wallet_store.json"):
-            with open("wallet_store.json") as f:
-                return json.load(f)
-        return {}
 
-
-def save_wallets(wallets):
-    with FileLock(LOCKFILE):
-        with open("wallet_store.json", "w") as f:
-            json.dump(wallets, f, indent=2)
-
-
-def safe_append_tx(tx):
-    with FileLock(LOCKFILE):
-        if os.path.exists("pending_tx.json"):
-            with open("pending_tx.json") as f:
-                data = json.load(f)
-        else:
-            data = {"txs": []}
-        for t in data["txs"]:
-            if t["user_id"] == tx["user_id"] and t.get("nonce") == tx["nonce"]:
-                return False
-        data["txs"].append(tx)
-        with open("pending_tx.json", "w") as f:
-            json.dump(data, f, indent=2)
-        return True
-
-def get_effective_balance(user_id: str):
-    with FileLock(LOCKFILE):
-        wallets = load_wallets()
-        pending = 0
-        if os.path.exists("pending_tx.json"):
-            with open("pending_tx.json") as f:
-                data = json.load(f)
-                for tx in data.get("txs", []):
-                    if tx["user_id"] == user_id and tx["type"] == "tip":
-                        pending += tx["amount"]
-        return wallets.get(user_id, {}).get("carp_balance", 0) - pending
 
 @bot.tree.command(name="list", description="List all active raffles")
 async def list_raffles(interaction: discord.Interaction):
@@ -207,11 +183,6 @@ async def buyticket(interaction: discord.Interaction, raffle_name: str, count: i
         return
 
     user_id = str(interaction.user.id)
-    # Ensure wallet exists and create if missing
-    wallets = load_wallets()
-    if user_id not in wallets:
-        wallets[user_id] = {"carp_balance": 0}
-        save_wallets(wallets)
     r = raffles[raffle_name]
     user_tickets = tickets.setdefault(raffle_name, {}).get(user_id, 0)
     if user_tickets + count > r['max_tickets_per_user']:
@@ -219,7 +190,7 @@ async def buyticket(interaction: discord.Interaction, raffle_name: str, count: i
         return
 
     total = 100 * count
-    effective = get_effective_balance(str(interaction.user.id))
+    effective = get_effective_balance(user_id)
 
     if effective < total:
         await interaction.response.send_message("❌ Not enough BOILIES.", ephemeral=True)
@@ -240,10 +211,7 @@ async def buyticket(interaction: discord.Interaction, raffle_name: str, count: i
         await interaction.response.send_message("⚠️ Transaction already in mempool. Please wait.", ephemeral=True)
         return
     try:
-        # Perform booking
-        wallets = load_wallets()
-        wallets[user_id]["carp_balance"] -= total
-        save_wallets(wallets)
+        # Only book tickets locally; wallet deduction is handled by tx processor
         tickets[raffle_name][user_id] = user_tickets + count
         save()
         await interaction.response.send_message(f"✅ You bought {count} ticket(s) for raffle **{raffle_name}**.", ephemeral=True)
@@ -304,19 +272,21 @@ async def draw_winner(interaction: discord.Interaction, name: str):
 
     ticket_holders = list(tickets[name].keys())
     ticket_counts = [tickets[name][user] for user in ticket_holders]
-    winner = random.choices(ticket_holders, weights=ticket_counts, k=1)[0]
+    winner_id = random.choices(ticket_holders, weights=ticket_counts, k=1)[0]
+    winner_user = await bot.fetch_user(int(winner_id))
+    winner_name = winner_user.name if winner_user else winner_id
 
     raffles[name]["active"] = False
 
     # Save winner info
     winners.append({
         "raffle": name,
-        "winner": winner,
+        "winner": winner_name,
         "timestamp": int(datetime.utcnow().timestamp())
     })
 
     save()
-    await interaction.response.send_message(f"🎉 The winner of **{name}** is {winner}! Congratulations!")
+    await interaction.response.send_message(f"🎉 The winner of **{name}** is {winner_name}! Congratulations!")
 
 
 # Admin command: /stop_raffle - mark a raffle as inactive
@@ -399,5 +369,18 @@ async def list_all(interaction: discord.Interaction):
         status = "active" if r.get("active") else "inactive"
         msg += f"\n• **{name}**: {r['prize']} (Draw: <t:{int(r['draw_time'])}:F>, Max/User: {r['max_tickets_per_user']}, Status: {status})"
     await interaction.response.send_message(msg, ephemeral=True)
+
+@bot.tree.command(name="reset_winners", description="Reset the list of raffle winners (Admin only)")
+async def reset_winners(interaction: discord.Interaction):
+    if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
+        await interaction.response.send_message("❌ This command is not allowed in this channel.", ephemeral=True)
+        return
+    if interaction.user.id not in ADMIN_IDS:
+        await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
+        return
+    global winners
+    winners = []
+    save()
+    await interaction.response.send_message("🗑️ All raffle winners have been reset.", ephemeral=True)
 
 bot.run(DISCORD_TOKEN)

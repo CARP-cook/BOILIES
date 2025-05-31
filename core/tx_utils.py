@@ -6,15 +6,15 @@ import hashlib
 from filelock import FileLock
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-WALLET_FILE = os.path.join(BASE_DIR, "wallet_store.json")
-PENDING_FILE = os.path.join(BASE_DIR, "pending_tx.json")
+DATA_DIR = os.path.join(BASE_DIR, "..", "data")
+WALLET_FILE = os.path.join(DATA_DIR, "wallet_store.json")
+PENDING_FILE = os.path.join(DATA_DIR, "pending_tx.json")
 LOCKFILE = WALLET_FILE + ".lock"
-TX_LOG_FILE = os.path.join(BASE_DIR, "tx_log.json")
-REJECTED_LOG_FILE = "rejected_tx_log.json"
+TX_LOG_FILE = os.path.join(DATA_DIR, "tx_log.json")
+REJECTED_LOG_FILE = os.path.join(DATA_DIR, "rejected_tx_log.json")
 FISHING_BOT_ID = os.getenv("FISHING_BOT_ID")
 MAX_LOG_SCAN = 2000  # Limit number of TXs to scan for duplicates
-
-TICKETS_FILE = "raffle_tickets.json"
+TICKETS_FILE = os.path.join(DATA_DIR, "raffle_tickets.json")
 
 
 def get_or_create_wallet(user: discord.User):

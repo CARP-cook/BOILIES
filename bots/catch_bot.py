@@ -6,7 +6,7 @@ import os
 from discord.ext import tasks, commands
 from dotenv import load_dotenv
 
-from tx_utils import (
+from core.tx_utils import (
     safe_append_tx,
     get_nonce,
     get_effective_balance
@@ -36,7 +36,7 @@ FISH_CHANNEL_IDS = list(FISH_CHANNELS.keys())
 treasury = FISHING_BOT_ID
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-LEADERBOARD_FILE = os.path.join(BASE_DIR, "fish_leaderboard.json")
+LEADERBOARD_FILE = os.path.join(os.path.dirname(BASE_DIR), "data", "fish_leaderboard.json")
 FISH_IMAGES_DIR = os.path.join(BASE_DIR, "fish_images")
 
 fish_pool = [
