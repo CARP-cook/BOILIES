@@ -8,11 +8,10 @@ __pycache__/
 *.lock
 *.json
 
-
 .idea/
 *.iml
 .vscode/
-
+dist/
 backup/
 
 .DS_Store
@@ -26,3 +25,4 @@ backup/
 .TemporaryItems
 .apdisk
 /debug.log
+/build/

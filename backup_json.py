@@ -2,10 +2,17 @@ import os
 import time
 import zipfile
 import datetime
+import sys
+from paths import BACKUP_DIR, DEBUG_FILE, DATA_DIR
 
-BACKUP_DIR = "backup"
+# Optional: Nur loggen, wenn nicht in GUI-Umgebung
+if __name__ != "__main__":
+    sys.stdout = open(DEBUG_FILE, "a")
+    sys.stderr = sys.stdout
+
 MAX_AGE_HOURS = 72
 BACKUP_INTERVAL_SECONDS = 3600  # 1 hour
+
 
 def create_backup():
     now = datetime.datetime.now()
@@ -15,10 +22,14 @@ def create_backup():
     zip_path = os.path.join(BACKUP_DIR, zip_name)
 
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for file in os.listdir():
-            if file.endswith(".json") and os.path.isfile(file):
-                zipf.write(file)
-    print(f"[{timestamp}] Created backup: {zip_path}")
+        for root, _, files in os.walk(DATA_DIR):
+            for file in files:
+                if file.endswith(".json"):
+                    full_path = os.path.join(root, file)
+                    arcname = os.path.relpath(str(full_path), start=str(DATA_DIR))
+                    zipf.write(str(full_path), str(arcname))
+    print(f"[{timestamp}] ✅ Created backup: {zip_path}")
+
 
 def cleanup_old_backups():
     now = time.time()
@@ -34,14 +45,29 @@ def cleanup_old_backups():
     if deleted:
         print(f"🧹 Deleted {deleted} old backup(s).")
 
-def run_backup_loop():
-    while True:
+
+def run_backup_loop(stop_event):
+    print("🌀 Backup loop started.")
+    while not stop_event.is_set():
         try:
             create_backup()
             cleanup_old_backups()
         except Exception as e:
             print(f"❌ Backup error: {e}")
-        time.sleep(BACKUP_INTERVAL_SECONDS)
+        # Stop wait: returns early if stop_event is set
+        if stop_event.wait(BACKUP_INTERVAL_SECONDS):
+            break
+    print("🛑 Backup loop stopped.")
+
+
+def run_backup(stop_event):
+    run_backup_loop(stop_event)
+
+
+# Alias for external usage, e.g., from BOILIE_control
+main = run_backup
+
 
 if __name__ == "__main__":
-    run_backup_loop()
+    import threading
+    run_backup(threading.Event())

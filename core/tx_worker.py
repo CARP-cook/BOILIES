@@ -1,4 +1,5 @@
 # tx_worker.py
+import sys
 import time
 from filelock import FileLock
 from core.tx_utils import (
@@ -11,11 +12,15 @@ from core.tx_utils import (
 )
 
 from core.tx_utils import WALLET_FILE, PENDING_FILE, LOCKFILE
+from paths import DEBUG_FILE
+
+sys.stdout = open(DEBUG_FILE, "a")
+sys.stderr = sys.stdout
 
 
-def process_pending_transactions():
+def process_pending_transactions(shutdown_event):
     print("🔄 TX worker started...")
-    while True:
+    while not shutdown_event.is_set():
         # print("🔄 Checking for pending transactions...")
         with FileLock(LOCKFILE):
             pending = load_json(PENDING_FILE)
@@ -137,8 +142,17 @@ def process_pending_transactions():
             save_json(WALLET_FILE, wallet)
             # print(f"✅ Updated wallet and pending tx files. Sleeping...\n")
 
-        time.sleep(10)
+        time.sleep(5)
+    print("🛑 TX worker stopped.")
+
+
+import threading
+
+
+def main():
+    shutdown_event = threading.Event()
+    process_pending_transactions(shutdown_event)
 
 
 if __name__ == "__main__":
-    process_pending_transactions()
+    main()
