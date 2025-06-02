@@ -25,7 +25,7 @@ load_dotenv()
 
 # DISCORD_TOKEN = os.getenv("DISCORD_TOKEN_RAFFLE")
 ADMIN_IDS = set(map(int, os.getenv("ADMIN_IDS", "").split(",")))
-FISHING_BOT_ID = os.getenv("FISHING_BOT_ID")
+CATCHBOT_ID = os.getenv("CATCHBOT_ID")
 ALLOWED_CHANNEL_IDS = set(map(int, os.getenv("RAFFLE_CHANNEL_IDS", "").split(",")))
 
 # Set up base and data directories
@@ -373,7 +373,7 @@ class RaffleBot(discord.Client):
             await interaction.response.send_message("🗑️ All raffle winners have been reset.", ephemeral=True)
 
 
-treasury = FISHING_BOT_ID
+treasury = CATCHBOT_ID
 bot = RaffleBot()
 
 

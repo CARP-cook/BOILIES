@@ -19,7 +19,7 @@ if PROJECT_ROOT not in sys.path:
 # Bot functions
 SCRIPTS = {
     "TX Worker": lambda ev: tx_worker.process_pending_transactions(ev),
-    "Hourly backups": lambda ev: backup_json.main(ev),
+    "Hourly Backups": lambda ev: backup_json.main(ev),
     "Tipping Bot": lambda ev: tipping_bot.run_bot(ev),
     "Catch Bot": lambda ev: catch_bot.create_catch_bot().run(stop_event=ev),
     "Raffle Bot": lambda ev: raffle_bot.run_bot(ev),
@@ -139,6 +139,9 @@ def create_gui():
             line = log_queue.get()
             output_text.config(state="normal")
             output_text.insert(tk.END, line)
+            # Limit to last 1000 lines
+            if int(output_text.index('end-1c').split('.')[0]) > 1000:
+                output_text.delete("1.0", "2.0")
             output_text.see(tk.END)
             output_text.config(state="disabled")
         root.after(200, poll_log_queue)

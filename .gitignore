@@ -11,7 +11,7 @@ __pycache__/
 .idea/
 *.iml
 .vscode/
-dist/
+dist_mac/
 backup/
 
 .DS_Store
