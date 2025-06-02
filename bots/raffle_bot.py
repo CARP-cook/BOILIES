@@ -222,57 +222,88 @@ class RaffleBot(discord.Client):
             save()
             await interaction.response.send_message(f"✅ Raffle **{name}** is now active.", ephemeral=True)
 
-        # /draw_winner
         @self.tree.command(name="draw_winner", description="Draw a winner for a raffle (Admin only)")
         @app_commands.describe(name="Raffle name to draw winner from")
         async def draw_winner(interaction: discord.Interaction, name: str):
-            if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
-                await interaction.response.send_message("❌ This command is not allowed in this channel.", ephemeral=True)
-                return
-            if interaction.user.id not in ADMIN_IDS:
-                await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
-                return
-            if name not in raffles:
-                await interaction.response.send_message("❌ Raffle not found.", ephemeral=True)
-                return
-            if name not in tickets or not tickets[name]:
-                await interaction.response.send_message("❌ No tickets sold for this raffle.", ephemeral=True)
-                return
+            try:
+                if interaction.channel_id not in ALLOWED_CHANNEL_IDS:
+                    await interaction.response.send_message("❌ This command is not allowed in this channel.", ephemeral=True)
+                    return
+                if interaction.user.id not in ADMIN_IDS:
+                    await interaction.response.send_message("❌ You are not authorized.", ephemeral=True)
+                    return
+                if name not in raffles:
+                    await interaction.response.send_message("❌ Raffle not found.", ephemeral=True)
+                    return
+                if name not in tickets or not tickets[name]:
+                    await interaction.response.send_message("❌ No tickets sold for this raffle.", ephemeral=True)
+                    return
 
-            ticket_holders = list(tickets[name].keys())
-            ticket_counts = [tickets[name][user] for user in ticket_holders]
-            winner_id = random.choices(ticket_holders, weights=ticket_counts, k=1)[0]
-            winner_user = await self.fetch_user(int(winner_id))
-            winner_name = winner_user.name if winner_user else winner_id
+                ticket_holders = list(tickets[name].keys())
+                ticket_counts = [tickets[name][user] for user in ticket_holders]
+                try:
+                    winner_id_raw = random.choices(ticket_holders, weights=ticket_counts, k=1)[0]
+                    print("🎲 Winner ID (raw):", repr(winner_id_raw))
+                    winner_id = int(str(winner_id_raw).strip())
+                    print("🎲 Winner ID (int):", winner_id)
+                    winner_user = await self.fetch_user(winner_id)
+                    winner_name = winner_user.name if winner_user else f"User ID {winner_id}"
+                except Exception as e:
+                    print(f"❌ Failed to determine or fetch winner: {e}")
+                    winner_id = str(winner_id_raw) if 'winner_id_raw' in locals() else "UNKNOWN"
+                    winner_name = f"User ID {winner_id}"
 
-            raffles[name]["active"] = False
+                raffles[name]["active"] = False
+                winners.append({
+                    "raffle": name,
+                    "winner": winner_name,
+                    "timestamp": int(datetime.utcnow().timestamp())
+                })
+                save_winners()
 
-            # Save winner info
-            winners.append({
-                "raffle": name,
-                "winner": winner_name,
-                "timestamp": int(datetime.utcnow().timestamp())
-            })
+                try:
+                    save()
+                except Exception as e:
+                    print(f"❌ Failed to save raffle state: {e}")
 
-            save()
-            # Remove all tickets for this raffle after drawing
-            raffles.pop(name, None)     # Remove the raffle entry itself
-            tickets.pop(name, None)     # Remove all associated tickets
-            save()
-            # Dramatic suspense sequence before announcing the winner
-            await interaction.response.send_message("🎉 Drawing the winner...")
-            await asyncio.sleep(1.5)
-            await interaction.followup.send("Shuffling the tickets...")
-            await interaction.followup.send(file=File(os.path.join(ASSETS_DIR, "spin_lottery.gif")))
-            await asyncio.sleep(4)
-            await interaction.followup.send("🥁 Final round...")
-            await asyncio.sleep(2)
-            await interaction.followup.send(f"🏆 The winner of the raffle **{name}** is ...")
-            await asyncio.sleep(2)
-            await interaction.followup.send(f"**{winner_name}**!!!")
-            await asyncio.sleep(1)
-            await interaction.followup.send(f"🎊🎉**Congratulations**!!!🎊🎉")
-            await interaction.followup.send(file=File(os.path.join(ASSETS_DIR, "winner.gif")))
+                raffles.pop(name, None)
+                tickets.pop(name, None)
+                try:
+                    save()
+                except Exception as e:
+                    print(f"❌ Failed to save after cleanup: {e}")
+
+                await interaction.response.send_message("🎉 Drawing the winner...")
+                await asyncio.sleep(1.5)
+                await interaction.followup.send("Shuffling the tickets...")
+
+                try:
+                    await interaction.followup.send(file=File(os.path.join(ASSETS_DIR, "spin_lottery.gif")))
+                except Exception as e:
+                    print(f"❌ Failed to send spin_lottery.gif: {e}")
+                    await interaction.followup.send("🎞️ [Animation missing]")
+
+                await asyncio.sleep(4)
+                await interaction.followup.send("🥁 Final round...")
+                await asyncio.sleep(2)
+                await interaction.followup.send(f"🏆 The winner of the raffle **{name}** is ...")
+                await asyncio.sleep(2)
+                await interaction.followup.send(f"**{winner_name}**!!!")
+                await asyncio.sleep(1)
+                await interaction.followup.send("🎊🎉**Congratulations**!!!🎊🎉")
+
+                try:
+                    await interaction.followup.send(file=File(os.path.join(ASSETS_DIR, "winner.gif")))
+                except Exception as e:
+                    print(f"❌ Failed to send winner.gif: {e}")
+                    await interaction.followup.send("🏁 [Winner animation missing]")
+
+            except Exception as e:
+                print("❌ Unexpected error in draw_winner:")
+                import traceback
+                traceback.print_exc()
+                if not interaction.response.is_done():
+                    await interaction.response.send_message("❌ An unexpected error occurred while drawing the winner.", ephemeral=True)
 
         # /stop_raffle
         @self.tree.command(name="stop_raffle", description="Mark a raffle as inactive (Admin only)")
@@ -414,6 +445,15 @@ def save():
         json.dump(tickets, f, indent=2)
     with open(WINNERS_FILE, "w") as f:
         json.dump(winners, f, indent=2)
+
+
+# Save only the winners list to WINNERS_FILE
+def save_winners():
+    try:
+        with open(WINNERS_FILE, "w", encoding="utf-8") as f:
+            json.dump(winners, f, indent=2)
+    except Exception as e:
+        print(f"❌ Failed to save winners.json: {e}")
 
 
 def canonical_json(obj):
