@@ -82,27 +82,27 @@ class CatchBot:
         self.spawn_fish = tasks.loop(seconds=30)(self._spawn_fish_task)
 
     def register_commands(self):
-        @self.bot.command(name="help")
+        @self.bot.command(name="help", aliases=["h"], case_insensitive=True)
         async def _help(ctx):
             await self.help_command(ctx)
 
-        @self.bot.command(name="leaderboard")
+        @self.bot.command(name="leaderboard", aliases=["lb", "top"], case_insensitive=True)
         async def _leaderboard(ctx):
             await self.leaderboard_command(ctx)
 
-        @self.bot.command(name="checkrights")
+        @self.bot.command(name="checkrights", aliases=["rights", "perms"], case_insensitive=True)
         async def _checkrights(ctx):
             await self.checkrights(ctx)
 
-        @self.bot.command(name="bait")
-        async def _bait(ctx, bait_type: str):
+        @self.bot.command(name="bait", aliases=["castbait"], case_insensitive=True)
+        async def _bait(ctx, *, bait_type: str):
             await self.bait_command(ctx, bait_type)
 
-        @self.bot.command(name="baitstatus")
+        @self.bot.command(name="baitstatus", aliases=["baitinfo"], case_insensitive=True)
         async def _baitstatus(ctx):
             await self.baitstatus(ctx)
 
-        @self.bot.command(name="spawnfish")
+        @self.bot.command(name="spawnfish", aliases=["fishnow"], case_insensitive=True)
         @commands.has_permissions(administrator=True)
         async def _spawnfish(ctx):
             await self.spawnfish(ctx)
@@ -119,11 +119,18 @@ class CatchBot:
         msg = (
             "🎣 **Catch Bot Commands**\n\n"
             "- `!leaderboard` – Show the top 10 fishers in this channel\n"
-            "- `!bait corn` – Use corn (200 BOILIES) to quadruple the spawn rate for 1 hour\n"
-            "- `!bait boilie` – Use boilie (1000 BOILIES) to boost the spawn rate eightfold for 2 hours\n"
+            "- `!bait <type>` – Use bait to boost fish spawns (paid in BOILIES)\n"
             "- `!baitstatus` – Show current bait effect in this channel\n\n"
-            "Just wait for fish to appear and be the first to click **🎣 Catch!**\n"
-            "The heavier the fish, the more BOILIES you earn.\n\n"
+            "**Available Baits:**\n"
+            "- `Boilies`: 30 min, 40×, 1000 BOILIES\n"
+            "- `Popups`: 60 min, 20×, 1000 BOILIES\n"
+            "- `Tiger nuts`: 60 min, 16×, 800 BOILIES\n"
+            "- `Halibut`: 60 min, 10×, 500 BOILIES\n"
+            "- `Mixers`: 60 min, 8×, 400 BOILIES\n"
+            "- `Maggots`: 60 min, 5×, 250 BOILIES\n"
+            "- `Worms`: 30 min, 10×, 250 BOILIES\n"
+            "- `Bread`: 30 min, 8×, 200 BOILIES\n"
+            "- `Corn`: 15 min, 16×, 200 BOILIES\n\n"
             "⏳ Cooldown: 30 minutes after catching a fish – or only 5 minutes if you're the one who cast the bait!"
         )
         await ctx.send(msg)
@@ -166,8 +173,12 @@ class CatchBot:
                 )
                 cooldown = self.botref.BAIT_CATCH_COOLDOWN if is_bait_caster else self.botref.BASE_CATCH_COOLDOWN
                 if elapsed < cooldown:
-                    remaining = int((cooldown - elapsed) // 60)
-                    message = f"⏳ You've already caught a fish recently. Try again in {remaining} minutes."
+                    remaining = cooldown - elapsed
+                    if remaining < 60:
+                        time_msg = f"{int(remaining)} seconds"
+                    else:
+                        time_msg = f"{int(remaining // 60)} minutes"
+                    message = f"⏳ You've already caught a fish recently. Try again in {time_msg}."
                     if interaction.response.is_done():
                         await interaction.followup.send(message, ephemeral=True)
                     else:
@@ -303,25 +314,28 @@ class CatchBot:
         user = str(ctx.author.id)
         channel_id = ctx.channel.id
         current_time = asyncio.get_event_loop().time()
+        bait_options = {
+            "boilies":      (30, 40, 1000),
+            "popups":       (60, 20, 1000),
+            "tiger nuts":   (60, 16, 800),
+            "halibut":      (60, 10, 500),
+            "mixers":       (60, 8, 400),
+            "maggots":      (60, 5, 250),
+            "worms":        (30, 10, 250),
+            "bread":        (30, 8, 200),
+            "corn":         (15, 16, 200)
+        }
+        bait_type = bait_type.lower().strip()
+        if bait_type not in bait_options:
+            await ctx.send("🐟 Unknown bait type. Available: " + ", ".join(bait_options.keys()))
+            return
+        duration_min, boost_factor, price = bait_options[bait_type]
         if channel_id in self.bait_boost:
             _, expiry, _ = self.bait_boost[channel_id]
             if current_time < expiry:
                 remaining = int((expiry - current_time) // 60)
                 await ctx.send(f"🪱 Bait is already active in this channel for another {remaining} minute(s).")
                 return
-        bait_prices = {
-            "corn": 250,
-            "boilie": 1000
-        }
-        bait_effect = {
-            "corn": 4,
-            "boilie": 8
-        }
-        if bait_type not in bait_prices:
-            await ctx.send("🐟 Unknown bait type. Use `corn` or `boilie`.")
-            return
-        price = bait_prices[bait_type]
-        boost_factor = bait_effect[bait_type]
         if not self.treasury:
             await ctx.send("⚠️ Treasury not yet initialized.")
             return
@@ -344,15 +358,10 @@ class CatchBot:
             return
         self.bait_boost[channel_id] = (
             boost_factor,
-            asyncio.get_event_loop().time() + 60 * 60 * (2 if bait_type == "boilie" else 1),
+            current_time + 60 * duration_min,
             user
         )
-        bait_emojis = {
-            "corn": "🌽",
-            "boilie": "🍡"
-        }
-        bait_label = "sweetcorn" if bait_type == "corn" else bait_type
-        await ctx.send(f"{bait_emojis.get(bait_type, '🎣')} You cast out some {bait_label}! Fish in this channel will be more active for {2 if bait_type == 'boilie' else 1} hour(s).")
+        await ctx.send(f"🎣 You used **{bait_type.title()}** – spawns boosted {boost_factor}× for {duration_min} minutes!")
 
     # Baitstatus command
     async def baitstatus(self, ctx):
