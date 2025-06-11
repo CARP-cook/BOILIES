@@ -12,10 +12,46 @@ from core.tx_utils import (
 )
 
 from core.tx_utils import WALLET_FILE, PENDING_FILE, LOCKFILE
+from paths import FACTORY_FILE
 from paths import DEBUG_FILE
-
 sys.stdout = open(DEBUG_FILE, "a")
 sys.stderr = sys.stdout
+
+def check_upgrade_completion():
+    try:
+        factory_data = load_json(FACTORY_FILE)
+        current_time = int(time.time())
+        updated = False
+
+        for user_id, factory in factory_data.items():
+            upgrade_time = factory.get("upgrade_ready_time")
+            if upgrade_time is not None and current_time >= upgrade_time:
+                factory["factory_level"] += 1
+                factory["upgrade_ready_time"] = None
+                print(f"🏭 Factory upgrade completed for user {user_id} to level {factory['factory_level']}")
+                updated = True
+
+            for idx, worker in enumerate(factory.get("workers", [])):
+                w_u = worker.get("upgrade_ready_time")
+                if w_u is not None and current_time >= w_u:
+                    worker["stars"] += 1
+                    worker["upgrade_ready_time"] = None
+                    print(f"👷‍♂️ Worker {idx} upgraded for user {user_id} to {worker['stars']} stars")
+                    updated = True
+
+            for idx, machine in enumerate(factory.get("machines", [])):
+                m_u = machine.get("upgrade_ready_time")
+                if m_u is not None and current_time >= m_u:
+                    machine["stars"] += 1
+                    machine["upgrade_ready_time"] = None
+                    print(f"🛠️ Machine {idx} upgraded for user {user_id} to {machine['stars']} stars")
+                    updated = True
+
+        if updated:
+            save_json(FACTORY_FILE, factory_data)
+
+    except Exception as e:
+        print(f"⚠️ Error checking upgrade completion: {e}")
 
 
 def process_pending_transactions(shutdown_event):
@@ -140,6 +176,7 @@ def process_pending_transactions(shutdown_event):
             pending["txs"] = txs
             save_json(PENDING_FILE, pending)
             save_json(WALLET_FILE, wallet)
+            check_upgrade_completion()
             # print(f"✅ Updated wallet and pending tx files. Sleeping...\n")
 
         time.sleep(5)

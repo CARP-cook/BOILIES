@@ -2,7 +2,7 @@ import threading
 import os
 import sys
 from core import tx_worker
-from bots import tipping_bot, catch_bot, raffle_bot, info_bot
+from bots import tipping_bot, catch_bot, raffle_bot, info_bot, factory_bot
 import backup_json
 import tkinter as tk
 from queue import Queue
@@ -23,7 +23,8 @@ SCRIPTS = {
     "Tipping Bot": lambda ev: tipping_bot.run_bot(ev),
     "Catch Bot": lambda ev: catch_bot.create_catch_bot().run(stop_event=ev),
     "Raffle Bot": lambda ev: raffle_bot.run_bot(ev),
-    "Info Bot": lambda ev: info_bot.run_bot(ev)
+    "Info Bot": lambda ev: info_bot.run_bot(ev),
+    "Factory Bot": lambda ev: factory_bot.run_bot(ev)
 }
 
 PROCESSES = {}
