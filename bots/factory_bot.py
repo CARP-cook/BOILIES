@@ -11,18 +11,31 @@ import math
 import time
 
 # --- FactoryBot Constants ---
-FACTORY_BASE_UPGRADE_COST = 1000
+FACTORY_BASE_UPGRADE_COST = 10000
 WORKER_COST = 1000
 MACHINE_COST = 2000
 MAX_FACTORY_LEVEL = 10
-MAX_WORKERS_PER_LEVEL = {lvl: min(1 + (lvl - 1) * 2, 18) for lvl in range(1, MAX_FACTORY_LEVEL + 1)}
+MAX_WORKERS_PER_LEVEL = {lvl: min(2 + (lvl - 1) * 2, 20) for lvl in range(1, MAX_FACTORY_LEVEL + 1)}
 MAX_MACHINES_PER_LEVEL = {lvl: min(lvl, 10) for lvl in range(1, MAX_FACTORY_LEVEL + 1)}
-
 BASE_UPGRADE_TIME_MINUTES = 1
 
 
 def stars_to_efficiency(stars):
     return min(1.0 + 0.5 * math.log2(1 + stars), 5.0)
+
+
+def fib(n):
+    a, b = 10_000, 10_000
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
+def get_factory_upgrade_cost(current_level):
+    if 1 <= current_level < 10:
+        return fib(current_level)
+    else:
+        return None
 
 
 class FactoryView(View):
@@ -71,16 +84,26 @@ class FactoryView(View):
                 ephemeral=True
             )
 
+    class RefreshButton(discord.ui.Button):
+        def __init__(self, user_id, factory_bot, row=0):
+            super().__init__(label="🔄 Refresh", style=discord.ButtonStyle.blurple, custom_id="refresh", row=row)
+            self.user_id = user_id
+            self.factory_bot = factory_bot
+
+        async def callback(self, interaction: discord.Interaction):
+            factory = self.factory_bot.get_user_factory(self.user_id)
+            embed = self.factory_bot.create_factory_embed(factory)
+            await interaction.response.edit_message(embed=embed, view=self.view)
+
     class BuyWorkerButton(Button):
         def __init__(self, row=None):
-            super().__init__(label=f"👷 Buy Worker ({WORKER_COST} BOILIES)", style=discord.ButtonStyle.primary, custom_id="buy_worker", row=row)
+            super().__init__(label=f"👷 Hire Worker ({WORKER_COST} BOILIES)", style=discord.ButtonStyle.primary, custom_id="buy_worker", row=row)
         async def callback(self, interaction: discord.Interaction):
             view: FactoryView = self.view
             if interaction.user.id != view.user_id:
                 await interaction.response.send_message("This is not your factory!", ephemeral=True)
                 return
             factory = view.factory_bot.get_user_factory(view.user_id)
-            now = time.time()
             # Check max workers for current factory level
             max_workers = MAX_WORKERS_PER_LEVEL.get(factory["factory_level"], 1)
             if len(factory.get("workers", [])) >= max_workers:
@@ -106,7 +129,7 @@ class FactoryView(View):
             }
             success = safe_append_tx(tx)
             if not success:
-                await interaction.response.send_message("❌ Failed to record transaction.", ephemeral=True)
+                await interaction.response.send_message("❌ Still processing the previous action. Please try again.", ephemeral=True)
                 return
             # Add new worker
             factory.setdefault("workers", []).append({"stars": 1, "upgrade_ready_time": None})
@@ -148,7 +171,7 @@ class FactoryView(View):
             }
             success = safe_append_tx(tx)
             if not success:
-                await interaction.response.send_message("❌ Failed to record transaction.", ephemeral=True)
+                await interaction.response.send_message("❌ Still processing the previous action. Please try again.", ephemeral=True)
                 return
             # Add new machine
             factory.setdefault("machines", []).append({"stars": 1, "upgrade_ready_time": None})
@@ -198,14 +221,16 @@ class FactoryView(View):
             # Add if requester is the owner OR no requester is provided
             if requester is None or requester.id == self.user_id:
                 self.add_item(self.RollButton(row=0))
-                self.add_item(self.BuyWorkerButton(row=0))
-                self.add_item(self.BuyMachineButton(row=0))
+                self.add_item(self.RefreshButton(self.user_id, self.factory_bot, row=0))
+                self.add_item(self.BuyWorkerButton(row=1))
+                self.add_item(self.BuyMachineButton(row=2))
                 self.add_item(self.UpgradeWorkerButton(row=1))
-                self.add_item(self.UpgradeMachineButton(row=1))
+                self.add_item(self.UpgradeMachineButton(row=2))
                 factory = self.factory_bot.get_user_factory(self.user_id)
                 current_level = factory["factory_level"]
-                upgrade_cost = int(FACTORY_BASE_UPGRADE_COST * (1.5 ** (current_level - 1)))
-                self.add_item(self.UpgradeFactoryButton(current_level, upgrade_cost, row=1))
+                # upgrade_cost = int(FACTORY_BASE_UPGRADE_COST * (1.5 ** (current_level - 1)))
+                upgrade_cost = get_factory_upgrade_cost(current_level)
+                self.add_item(self.UpgradeFactoryButton(current_level, upgrade_cost, row=3))
 
     class UpgradeFactoryButton(Button):
         def __init__(self, current_level, upgrade_cost, row=None):
@@ -259,7 +284,7 @@ class FactoryView(View):
                 }
                 success = safe_append_tx(tx)
                 if not success:
-                    await interaction.response.send_message("❌ Failed to record transaction.", ephemeral=True)
+                    await interaction.response.send_message("❌ Still processing the previous action. Please try again.", ephemeral=True)
                     return
 
                 # Exponential upgrade duration: BASE_UPGRADE_TIME_MINUTES * (2 ** level)
@@ -350,7 +375,7 @@ class SelectWorkerButton(discord.ui.Button):
                 return
 
             factory_level = factory.get("factory_level", 1)
-            max_stars = min(factory_level, 5)
+            max_stars = min(factory_level + 1, 5)
             current_stars = worker.get("stars", 0)
             if current_stars + 1 > max_stars:
                 await interaction.response.send_message(
@@ -377,7 +402,7 @@ class SelectWorkerButton(discord.ui.Button):
             }
             success = safe_append_tx(tx)
             if not success:
-                await interaction.response.send_message("❌ Failed to record transaction.", ephemeral=True)
+                await interaction.response.send_message("❌ Still processing the previous action. Please try again.", ephemeral=True)
                 return
 
             duration_minutes = BASE_UPGRADE_TIME_MINUTES * (1.5 ** (current_stars + 1))
@@ -460,18 +485,18 @@ class SelectMachineButton(discord.ui.Button):
             )
             return
 
-        stars = machine.get("stars", 0)
+        current_stars = machine.get("stars", 0)
         factory_level = factory.get("factory_level", 1)
-        max_level = factory_level
-        if stars >= max_level:
+        max_level = min(factory_level + 1, 5)
+        if current_stars + 1 > max_level:
             await interaction.response.send_message(f"❌ Machines can only be upgraded to {max_level} stars with your current factory level.", ephemeral=True)
             return
 
-        if stars >= 5:
+        if current_stars >= 5:
             await interaction.response.send_message("❌ This machine is already max level.", ephemeral=True)
             return
 
-        cost = int(MACHINE_COST * (2 ** stars))
+        cost = int(MACHINE_COST * (2 ** current_stars))
         balance = get_effective_balance(str(view.user_id))
         if balance < cost:
             await interaction.response.send_message("❌ Not enough BOILIES to upgrade this machine.", ephemeral=True)
@@ -493,13 +518,13 @@ class SelectMachineButton(discord.ui.Button):
             await interaction.response.send_message("❌ Failed to record transaction.", ephemeral=True)
             return
 
-        duration_minutes = BASE_UPGRADE_TIME_MINUTES * (1.5 ** (stars + 1))
+        duration_minutes = BASE_UPGRADE_TIME_MINUTES * (1.5 ** (current_stars + 1))
         machine["upgrade_ready_time"] = now + duration_minutes * 60
         view.factory_bot.update_user_factory(view.user_id, factory)
         hours = int(duration_minutes // 60)
         mins = int(duration_minutes % 60)
         await interaction.response.send_message(
-            f"⏳ Machine upgrade to {stars + 1}⭐ started! Time until completion: {hours}h {mins}m",
+            f"⏳ Machine upgrade to {current_stars + 1}⭐ started! Time until completion: {hours}h {mins}m",
             ephemeral=True
         )
 
@@ -583,7 +608,6 @@ class FactoryBot:
         print(f"✅ show_factory_overview called for user: {interaction.user.id}")
         try:
             user_id = interaction.user.id
-            print("📦 Loading factory")
             if not factory:
                 self.load_data()
                 factory = self.get_user_factory(str(user_id))
@@ -637,14 +661,12 @@ class FactoryBot:
                 await interaction.followup.send("You don't own a factory yet. Would you like to build one?", view=view, ephemeral=True)
                 return
 
-            print("🛠 Formatting embed")
             self.load_data()
             embed = self.create_factory_embed(factory)
             # Ensure user_id is int
             user_id = int(user_id)
             # view = FactoryView(user_id, self)
             view = FactoryView(user_id, self, requester=interaction.user)
-            print("📤 Sending embed + view")
             # Patch: check is_done before sending
             if interaction.response.is_done():
                 await interaction.followup.send(embed=embed, view=view, ephemeral=True)
@@ -696,38 +718,24 @@ class FactoryBot:
 
         # --- Workers ---
         workers = factory.get("workers", [])
-        upgrading_workers = []
-        #for idx, w in enumerate(workers):
-        #    stars = w.get("stars", 1)
-        #    uet = w.get("upgrade_ready_time")
-        #    if uet is not None and now < uet:
-        #        upgrading_workers.append((idx, stars, uet))
-        #w_star_counts = {}
-        #for w in workers:
-        #    s = w.get("stars", 0)
-        #    w_star_counts[s] = w_star_counts.get(s, 0) + 1
-        #w_summary = ", ".join([f"{n}×{s}⭐" for s, n in sorted(w_star_counts.items())]) if w_star_counts else "None"
-        #embed.add_field(name="Workers", value=f"{len(workers)} ({w_summary})", inline=True)
         embed.add_field(name="Workers", value=f"{len(workers)} hired", inline=True)
-        #embed.add_field(name="\u200b", value="\u200b", inline=True)
+        upgrading_workers = []
+        for idx, w in enumerate(workers):
+            uet = w.get("upgrade_ready_time")
+            stars = w.get("stars", 0)
+            if uet and now < uet:
+                upgrading_workers.append((idx, stars, uet))
 
         # --- Machines ---
         machines = factory.get("machines", [])
-        upgrading_machines = []
-        #for idx, m in enumerate(machines):
-        #    stars = m.get("stars", 0)
-        #    uet = m.get("upgrade_ready_time")
-        #    if uet is not None and now < uet:
-        #        upgrading_machines.append((idx, stars, uet))
-        #m_star_counts = {}
-        #for m in machines:
-        #    s = m.get("stars", 0)
-        #    m_star_counts[s] = m_star_counts.get(s, 0) + 1
-        #m_summary = ", ".join([f"{n}×{s}⭐" for s, n in sorted(m_star_counts.items())]) if m_star_counts else "None"
-        #embed.add_field(name="Machines", value=f"{len(machines)} ({m_summary})", inline=True)
-        #embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(name="Machines", value=f"{len(machines)} installed", inline=True)
-        #embed.add_field(name="\u200b", value="\u200b", inline=True)
+        upgrading_machines = []
+        for idx, m in enumerate(machines):
+            uet = m.get("upgrade_ready_time")
+            stars = m.get("stars", 0)
+            if uet and now < uet:
+                upgrading_machines.append((idx, stars, uet))
+
 
         # --- Production Breakdown ---
         # Calculate production rate inline instead of using self.calculate_production_rate
@@ -752,7 +760,7 @@ class FactoryBot:
             f"Final rate: **{prod_rate} Boilies/hour**",
         ]
         embed.add_field(name="Production Breakdown", value="\n".join(breakdown_lines), inline=False)
-        embed.add_field(name="Boilies ready to roll", value=f"{rolled} to roll")
+        embed.add_field(name="Boilies", value=f"{rolled} ready to roll")
 
         # --- Upgrade Timers ---
         for idx, stars, uet in upgrading_workers:
@@ -810,6 +818,3 @@ def run_bot(stop_event=None):
     finally:
         loop.close()
         print("🔻 Factory Bot has shut down.")
-
-
-
