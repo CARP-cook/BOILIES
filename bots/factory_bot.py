@@ -17,7 +17,7 @@ MACHINE_COST = 2000
 MAX_FACTORY_LEVEL = 10
 MAX_WORKERS_PER_LEVEL = {lvl: min(2 + (lvl - 1) * 2, 20) for lvl in range(1, MAX_FACTORY_LEVEL + 1)}
 MAX_MACHINES_PER_LEVEL = {lvl: min(lvl, 10) for lvl in range(1, MAX_FACTORY_LEVEL + 1)}
-BASE_UPGRADE_TIME_MINUTES = 1
+BASE_UPGRADE_TIME_MINUTES = 60
 
 
 def stars_to_efficiency(stars):
@@ -145,7 +145,6 @@ class FactoryView(View):
                 await interaction.response.send_message("This is not your factory!", ephemeral=True)
                 return
             factory = view.factory_bot.get_user_factory(view.user_id)
-            now = time.time()
             # Check max machines for current factory level
             max_machines = MAX_MACHINES_PER_LEVEL.get(factory["factory_level"], 1)
             if len(factory.get("machines", [])) >= max_machines:
@@ -230,7 +229,9 @@ class FactoryView(View):
                 current_level = factory["factory_level"]
                 # upgrade_cost = int(FACTORY_BASE_UPGRADE_COST * (1.5 ** (current_level - 1)))
                 upgrade_cost = get_factory_upgrade_cost(current_level)
-                self.add_item(self.UpgradeFactoryButton(current_level, upgrade_cost, row=3))
+                # self.add_item(self.UpgradeFactoryButton(current_level, upgrade_cost, row=3))
+                if current_level < MAX_FACTORY_LEVEL:
+                    self.add_item(self.UpgradeFactoryButton(current_level, upgrade_cost, row=3))
 
     class UpgradeFactoryButton(Button):
         def __init__(self, current_level, upgrade_cost, row=None):
@@ -435,11 +436,17 @@ class SelectMachineView(discord.ui.View):
         self.factory_bot.data = self.factory_bot.load_data()
         self.factory = factory_bot.get_user_factory(self.user_id)
         self.balance = get_effective_balance(str(self.user_id))
+        self.factory_level = self.factory.get("factory_level", 1)
         for idx, machine in enumerate(self.factory.get("machines", [])):
             stars = machine.get("stars", 0)
+            max_stars= min(self.factory_level + 1, 5)
             # Show a disabled button for maxed machines
             if stars > 4:
                 label = f"⚙️ Machine {idx+1}: Fully Upgraded ({stars}⭐)"
+                self.add_item(SelectMachineButton(idx, label, discord.ButtonStyle.gray, 0, disabled=True))
+                continue
+            if stars >= max_stars:
+                label = f"⚙️ Machine {idx+1}: Increase Factory Level to upgrade"
                 self.add_item(SelectMachineButton(idx, label, discord.ButtonStyle.gray, 0, disabled=True))
                 continue
             cost = int(MACHINE_COST * (2 ** stars))
@@ -531,7 +538,6 @@ class SelectMachineButton(discord.ui.Button):
 
 class FactoryBot:
     DATA_FILE = FACTORY_FILE
-    # DEFAULT_PROD = 5  # base Boilies/hour for factory level 1
 
     def __init__(self):
         load_dotenv()
@@ -564,23 +570,23 @@ class FactoryBot:
         user_id = str(user_id)
         factory = self.data.get(user_id)
         # Add missing upgrade_ready_time fields and migrate efficiency→stars for machines
-        changed = False
-        if factory:
-            if "upgrade_ready_time" not in factory:
-                factory["upgrade_ready_time"] = None
-                changed = True
-            if "workers" in factory:
-                for w in factory["workers"]:
-                    if "upgrade_ready_time" not in w:
-                        w["upgrade_ready_time"] = 0
-                        changed = True
-            if "machines" in factory:
-                for m in factory["machines"]:
-                    if "upgrade_ready_time" not in m:
-                        m["upgrade_ready_time"] = 0
-                        changed = True
-            if changed:
-                self.update_user_factory(user_id, factory)
+ #       changed = False
+ #       if factory:
+ #           if "upgrade_ready_time" not in factory:
+ #               factory["upgrade_ready_time"] = None
+ #               changed = True
+ #           if "workers" in factory:
+ #               for w in factory["workers"]:
+ #                   if "upgrade_ready_time" not in w:
+ #                       w["upgrade_ready_time"] = 0
+ #                       changed = True
+ #           if "machines" in factory:
+ #               for m in factory["machines"]:
+ #                   if "upgrade_ready_time" not in m:
+ #                       m["upgrade_ready_time"] = 0
+ #                       changed = True
+ #           if changed:
+ #               self.update_user_factory(user_id, factory)
         return factory
 
     def update_user_factory(self, user_id, factory):
@@ -718,7 +724,8 @@ class FactoryBot:
 
         # --- Workers ---
         workers = factory.get("workers", [])
-        embed.add_field(name="Workers", value=f"{len(workers)} hired", inline=True)
+        max_workers = MAX_WORKERS_PER_LEVEL.get(factory["factory_level"], 1)
+        embed.add_field(name="Workers", value=f"{len(workers)} / {max_workers} hired", inline=True)
         upgrading_workers = []
         for idx, w in enumerate(workers):
             uet = w.get("upgrade_ready_time")
@@ -728,7 +735,8 @@ class FactoryBot:
 
         # --- Machines ---
         machines = factory.get("machines", [])
-        embed.add_field(name="Machines", value=f"{len(machines)} installed", inline=True)
+        max_machines = MAX_MACHINES_PER_LEVEL.get(factory["factory_level"], 1)
+        embed.add_field(name="Machines", value=f"{len(machines)} / {max_machines} installed", inline=True)
         upgrading_machines = []
         for idx, m in enumerate(machines):
             uet = m.get("upgrade_ready_time")
@@ -763,17 +771,26 @@ class FactoryBot:
         embed.add_field(name="Boilies", value=f"{rolled} ready to roll")
 
         # --- Upgrade Timers ---
-        for idx, stars, uet in upgrading_workers:
-            remaining = int(uet - now)
-            hours = remaining // 3600
-            minutes = (remaining % 3600) // 60
-            embed.add_field(name=f"Worker #{idx+1} Upgrade", value=f"⏳ {stars}→{stars+1}⭐ (ready in {hours}h {minutes}m)", inline=False)
-        for idx, stars, uet in upgrading_machines:
-            next_stars = stars + 1
-            remaining = int(uet - now)
-            hours = remaining // 3600
-            minutes = (remaining % 3600) // 60
-            embed.add_field(name=f"Machine #{idx+1} Upgrade", value=f"⏳ {stars}→{next_stars}⭐ (ready in {hours}h {minutes}m)", inline=False)
+        if upgrading_workers:
+            lines = []
+            for idx, stars, uet in upgrading_workers:
+                remaining = int(uet - now)
+                hours = remaining // 3600
+                minutes = (remaining % 3600) // 60
+                lines.append(f"👷 Worker #{idx + 1}: ⏳ {stars}→{stars + 1}⭐ in {hours}h {minutes}m")
+                lines.append("-")
+            embed.add_field(name="Upgrading Workers", value="\n".join(lines), inline=False)
+
+        if upgrading_machines:
+            lines = []
+            for idx, stars, uet in upgrading_machines:
+                next_stars = stars + 1
+                remaining = int(uet - now)
+                hours = remaining // 3600
+                minutes = (remaining % 3600) // 60
+                lines.append(f"⚙️ Machine #{idx + 1}: ⏳ {stars}→{next_stars}⭐ in {hours}h {minutes}m")
+                lines.append("-")
+            embed.add_field(name="Upgrading Machines", value="\n".join(lines), inline=False)
 
         return embed
 
